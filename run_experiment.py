@@ -14,7 +14,7 @@ Examples
   python run_experiment.py --list-models                  # chat models on your account
   python run_experiment.py --limit 5                      # quick real test, 5 questions
   python run_experiment.py                                # full run with the default model
-  python run_experiment.py --model meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+  python run_experiment.py --model Qwen/Qwen3.5-9B --no-thinking
 """
 import argparse
 import json
@@ -61,6 +61,10 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--limit", type=int, help="only the first N questions")
     ap.add_argument("--workers", type=int, default=4, help="parallel requests (default 4)")
+    ap.add_argument("--max-tokens", type=int, default=1024,
+                    help="longest allowed response (default 1024)")
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="turn off built-in reasoning for hybrid models such as Qwen 3.5")
     ap.add_argument("--questions", default=str(ROOT / "data" / "questions.jsonl"))
     ap.add_argument("--out", help="output file (default results/raw/<model>.jsonl)")
     ap.add_argument("--seed", type=int, default=0, help="seed for answer-choice order")
@@ -78,7 +82,8 @@ def main():
         model = SimulatedModel()
         out = pathlib.Path(args.out or ROOT / "results" / "dry_run" / "simulated.jsonl")
     else:
-        model = TogetherModel(args.model)
+        model = TogetherModel(args.model, max_tokens=args.max_tokens,
+                              thinking=not args.no_thinking)
         out = pathlib.Path(args.out or ROOT / "results" / "raw" / f"{slug(args.model)}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -116,12 +121,15 @@ def main():
             "correct_letter": correct_letter, "answer": letter, "confidence": confidence,
             "correct": letter == correct_letter, "parsed": letter is not None,
             "response": reply["text"],
+            "finish_reason": reply.get("finish_reason"),
+            "reasoning": reply.get("reasoning"),
             "prompt_tokens": reply["prompt_tokens"],
             "completion_tokens": reply["completion_tokens"],
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
 
     errors = 0
+    unparsed = cut_off = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool, open(out, "a") as f:
         futures = {pool.submit(run, job): job for job in jobs}
         for future in as_completed(futures):
@@ -134,12 +142,19 @@ def main():
                 continue
             with lock:
                 f.write(json.dumps(record) + "\n")
+                unparsed += not record["parsed"]
+                cut_off += record["finish_reason"] == "length"
                 f.flush()
                 finished += 1
                 if finished % 25 == 0 or finished == len(jobs):
                     print(f"  {finished}/{len(jobs)} saved")
 
     print(f"Done. {finished} saved, {errors} failed.")
+    if unparsed:
+        print(f"Warning: {unparsed} saved responses had no readable answer"
+              + (f", and {cut_off} were cut off at the token limit" if cut_off else "") + ".")
+        print("If this is a large share, delete the output file and rerun with "
+              "--no-thinking or a larger --max-tokens.")
     if errors:
         print("Run the same command again to retry the failed requests.")
 
