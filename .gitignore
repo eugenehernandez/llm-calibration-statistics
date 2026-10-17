@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Simulated test output
+results/dry_run/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
