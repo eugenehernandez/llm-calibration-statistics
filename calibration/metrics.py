@@ -85,5 +85,11 @@ def bootstrap_ci(confidence, correct, n_boot=2000, level=0.95, seed=0, n_bins=10
         for k in draws:
             draws[k].append(s[k])
     alpha = (1 - level) / 2
-    return {k: (float(np.nanquantile(v, alpha)), float(np.nanquantile(v, 1 - alpha)))
-            for k, v in draws.items()}
+    out = {}
+    for k, v in draws.items():
+        v = np.asarray(v, dtype=float)
+        v = v[~np.isnan(v)]
+        # AUROC is undefined in a resample with no wrong (or no right) answers
+        out[k] = ((float(np.quantile(v, alpha)), float(np.quantile(v, 1 - alpha)))
+                  if len(v) else (float("nan"), float("nan")))
+    return out

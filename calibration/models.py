@@ -7,7 +7,7 @@ from .prompts import LETTERS
 
 
 class TogetherModel:
-    def __init__(self, model, max_tokens=1024):
+    def __init__(self, model, max_tokens=1024, thinking=True):
         from dotenv import load_dotenv
         from together import Together
 
@@ -20,16 +20,27 @@ class TogetherModel:
         self.client = Together(api_key=api_key, max_retries=8, timeout=120)
         self.model = model
         self.max_tokens = max_tokens
+        self.thinking = thinking
 
     def complete(self, messages, temperature, seed=None):
         kwargs = dict(model=self.model, messages=messages,
                       temperature=temperature, max_tokens=self.max_tokens)
         if seed is not None:
             kwargs["seed"] = seed
+        if not self.thinking:
+            # Hybrid models such as Qwen 3.5 "think" before answering by default.
+            # This asks them to answer directly, as the Llama models do.
+            kwargs["reasoning"] = {"enabled": False}
         response = self.client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        message = choice.message
         usage = getattr(response, "usage", None)
+        reasoning = (getattr(message, "reasoning", None)
+                     or getattr(message, "reasoning_content", None))
         return {
-            "text": response.choices[0].message.content,
+            "text": message.content or "",
+            "reasoning": reasoning,
+            "finish_reason": getattr(choice, "finish_reason", None),
             "prompt_tokens": getattr(usage, "prompt_tokens", None),
             "completion_tokens": getattr(usage, "completion_tokens", None),
         }
@@ -61,4 +72,5 @@ class SimulatedModel:
             [c for c in LETTERS if c != correct_letter])
         confidence = round(min(100, 100 * skill + 20 + rng.gauss(0, 8)))
         text = f"Simulated reasoning.\nAnswer: {letter}\nConfidence: {confidence}"
-        return {"text": text, "prompt_tokens": 0, "completion_tokens": 0}
+        return {"text": text, "reasoning": None, "finish_reason": "stop",
+                "prompt_tokens": 0, "completion_tokens": 0}
