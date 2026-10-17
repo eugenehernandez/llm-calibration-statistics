@@ -1,0 +1,8 @@
+together>=2.0
+python-dotenv
+numpy
+pandas
+scipy
+matplotlib
+jupyter
+pytest
